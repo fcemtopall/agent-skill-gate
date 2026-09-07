@@ -1,0 +1,31 @@
+{
+  "name": "agent-skill-gate-vscode",
+  "displayName": "Agent Skill Gate",
+  "description": "Agent skillerini tek tıkla açıp kapatan ve context yöneten kontrol paneli",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": [
+    "workspaceContains:**/.agent-skills.json"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "agentSkillGate.toggleSkills",
+        "title": "Agent Skills: Skilleri Yönet",
+        "category": "Agent Skill Gate"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsc -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.5.0"
+  }
+}
