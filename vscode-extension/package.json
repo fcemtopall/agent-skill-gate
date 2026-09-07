@@ -1,5 +1,5 @@
 {
-  "name": "agent-skill-gate-vscode",
+  "name": "@fcemtopall/agent-skill-gate-vscode",
   "displayName": "Agent Skill Gate",
   "description": "Agent skillerini tek tıkla açıp kapatan ve context yöneten kontrol paneli",
   "version": "0.0.1",
