@@ -112,39 +112,63 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   // 4. QuickPick Yönetim Menüsü
-  const manageSkillsCommand = vscode.commands.registerCommand('agentSkillGate.manageSkills', async () => {
+const manageSkillsCommand = vscode.commands.registerCommand('agentSkillGate.manageSkills', async () => {
     const capabilities = scanDiscoveredCapabilities();
     if (capabilities.length === 0) {
       vscode.window.showInformationMessage('Sistemde yönetilebilir 3rd-party CLI yeteneği bulunamadı.');
       return;
     }
 
-    let activeIds: string[] = [];
-    if (fs.existsSync(configPath)) {
-      try {
-        const raw = fs.readFileSync(configPath, 'utf-8');
-        const data: SkillConfig = JSON.parse(raw);
-        activeIds = data.activeSkillIds || [];
-      } catch {}
-    }
-
-    const quickPickItems: vscode.QuickPickItem[] = capabilities.map(cap => ({
-      label: cap.label,
-      description: cap.description,
-      picked: activeIds.includes(cap.id),
-      detail: cap.id
-    }));
-
-    const selected = await vscode.window.showQuickPick(quickPickItems, {
-      canPickMany: true,
-      placeHolder: 'Aktif etmek istediğiniz 3rd-party yetenekleri belirleyin (Seçilmeyenler kilitlenir):'
+    // 1. Önce Mod Seçimi Göster
+    const profileChoice = await vscode.window.showQuickPick([
+      { label: '⚡ Hızlı Geliştirme (Fast Prototyping)', description: 'Guard ve denetim hook\'ları kapalı.', detail: 'prototyping' },
+      { label: '🛡️ Güvenlik ve Denetim (Full Guard & Audit)', description: 'Bütün 3rd-party güvenlik/hook araçları devrede.', detail: 'audit' },
+      { label: '🧹 Yalın Mod (Clean Slate)', description: 'Bütün 3rd-party araçları kapatır, sıfır gürültü.', detail: 'clean' },
+      { label: '⚙️ Özel Yapılandırma (Manuel)', description: 'Yetenekleri tek tek el ile seçin.', detail: 'custom' }
+    ], {
+      placeHolder: 'Çalışma modunu belirleyin:'
     });
 
-    if (selected === undefined) return;
+    if (!profileChoice) return;
 
-    const newActiveIds = selected.map(item => item.detail!);
+    let newActiveIds: string[] = [];
 
-    // Config dosyasını güncelle
+    if (profileChoice.detail === 'clean') {
+      newActiveIds = [];
+    } else if (profileChoice.detail === 'audit') {
+      newActiveIds = capabilities.map(c => c.id);
+    } else if (profileChoice.detail === 'prototyping') {
+      newActiveIds = capabilities
+        .filter(c => {
+          const lower = c.canonicalPath.toLowerCase();
+          return !lower.includes('guard') && !lower.includes('scanner') && !lower.includes('audit') && !lower.includes('check');
+        })
+        .map(c => c.id);
+    } else {
+      // Custom / Manuel seçim
+      let currentActiveIds: string[] = [];
+      if (fs.existsSync(configPath)) {
+        try {
+          const raw = fs.readFileSync(configPath, 'utf-8');
+          currentActiveIds = JSON.parse(raw).activeSkillIds || [];
+        } catch {}
+      }
+
+      const selected = await vscode.window.showQuickPick(
+        capabilities.map(cap => ({
+          label: cap.label,
+          description: cap.description,
+          picked: currentActiveIds.includes(cap.id),
+          detail: cap.id
+        })),
+        { canPickMany: true, placeHolder: 'Yetenekleri tek tek belirleyin:' }
+      );
+
+      if (selected === undefined) return;
+      newActiveIds = selected.map(s => s.detail!);
+    }
+
+    // Config ve Disk Senkronizasyonu
     const updatedConfig: SkillConfig = {
       version: "1.0.0",
       activeSkillIds: newActiveIds,
@@ -152,11 +176,10 @@ export function activate(context: vscode.ExtensionContext) {
     };
     fs.writeFileSync(configPath, JSON.stringify(updatedConfig, null, 2), 'utf-8');
 
-    // Diskteki dosya isimlerini (asg-disabled) anında eşitle
     syncFilesOnDisk(capabilities, newActiveIds);
-
     updateStatusBar();
-    vscode.window.showInformationMessage(`Agent Skill Gate: ${newActiveIds.length} yetenek güncellendi.`);
+
+    vscode.window.showInformationMessage(`Agent Skill Gate: ${profileChoice.label} uygulandı (${newActiveIds.length} aktif).`);
   });
 
   context.subscriptions.push(manageSkillsCommand);

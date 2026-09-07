@@ -6,7 +6,9 @@
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Other"],
+  "categories": [
+    "Other"
+  ],
   "activationEvents": [
     "workspaceContains:**/.agent-skills.json"
   ],
@@ -24,7 +26,7 @@
     "build": "tsc -p ./"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
+    "@types/node": "^20.19.43",
     "@types/vscode": "^1.85.0",
     "typescript": "^5.5.0"
   }

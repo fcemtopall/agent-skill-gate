@@ -1,47 +1,79 @@
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import { StateManager } from '../core/state-manager.js';
-import { SkillCatalog } from '../core/catalog.js';
+import { PluginScanner } from '../harvester/scanner.js';
+import { PROFILES, ProfileType } from '../core/profiles.js';
 
 export async function showSkillSelector(stateManager: StateManager): Promise<void> {
   console.clear();
   p.intro(pc.bgCyan(pc.black(' AGENT SKILL GATE ')));
 
-  const allSkills = SkillCatalog.getSkills();
-  const builtInCount = SkillCatalog.builtInCount;
+  const scanner = new PluginScanner();
+  const { manageable, builtInCount, details } = scanner.scanManageable();
 
   if (builtInCount > 0) {
-    p.log.success(pc.dim(`${builtInCount} adet yerleşik CLI komutu aktif ve kilitli.`));
+    p.log.success(pc.dim(`${builtInCount} adet yerleşik CLI komutu aktif ve koruma altında.`));
   }
 
-  // Sadece kullanıcının önceden bilerek açtığı skilleri getir
-  const activeIds = stateManager.getActiveSkills();
+  // 1. Adım: Çalışma Modu / Profil Seçimi
+  const modeOptions = [
+    ...PROFILES.map(prof => ({
+      value: prof.id,
+      label: prof.label,
+      hint: prof.description
+    })),
+    {
+      value: 'custom' as ProfileType,
+      label: '⚙️ Özel Yapılandırma (Manuel Seçim)',
+      hint: 'Yetenekleri tek tek checkbox listesinden seçin.'
+    }
+  ];
 
-  const options = allSkills.map((skill) => {
-    return {
-      value: skill.id,
-      label: pc.bold(skill.name),
-      hint: `${pc.dim(skill.description)} ${pc.yellow(`[~${skill.estimatedTokens} tok]`)}`
-    };
+  const selectedMode = await p.select({
+    message: 'Çalışma modunu belirleyin:',
+    options: modeOptions
   });
 
-  const selected = await p.multiselect({
-    message: `Açmak veya kapatmak istediğiniz 3rd-party yetenekleri belirleyin:`,
-    options: options,
-    initialValues: activeIds, // Öneri yok, ne açıksa sadece o seçili gelir
-    required: false
-  });
-
-  if (p.isCancel(selected)) {
+  if (p.isCancel(selectedMode)) {
     p.cancel('İşlem iptal edildi.');
     process.exit(0);
   }
 
-  const newSelectedIds = selected as string[];
+  let finalSelectedIds: string[] = [];
 
-  // Kullanıcının manuel seçimine göre state'i güncelle
-  for (const skill of allSkills) {
-    const shouldBeActive = newSelectedIds.includes(skill.id);
+  // 2. Adım: Mod Mantığına Göre ID Belirleme
+  if (selectedMode !== 'custom') {
+    const profile = PROFILES.find(p => p.id === selectedMode)!;
+    finalSelectedIds = details
+      .filter(cap => profile.filter(cap))
+      .map(cap => cap.id);
+  } else {
+    // Manuel seçim ekranı
+    const activeIds = stateManager.getActiveSkills();
+    const options = manageable.map((skill) => ({
+      value: skill.id,
+      label: pc.bold(skill.name),
+      hint: `${pc.dim(skill.description)} ${pc.yellow(`[~${skill.estimatedTokens} tok]`)}`
+    }));
+
+    const manualSelected = await p.multiselect({
+      message: 'Aktif etmek istediğiniz yetenekleri belirleyin:',
+      options: options,
+      initialValues: activeIds,
+      required: false
+    });
+
+    if (p.isCancel(manualSelected)) {
+      p.cancel('İşlem iptal edildi.');
+      process.exit(0);
+    }
+
+    finalSelectedIds = manualSelected as string[];
+  }
+
+  // State senkronizasyonu
+  for (const skill of manageable) {
+    const shouldBeActive = finalSelectedIds.includes(skill.id);
     const isCurrentlyActive = stateManager.isSkillActive(skill.id);
 
     if (shouldBeActive !== isCurrentlyActive) {
@@ -49,14 +81,14 @@ export async function showSkillSelector(stateManager: StateManager): Promise<voi
     }
   }
 
-  const totalTokens = allSkills
-    .filter(s => newSelectedIds.includes(s.id))
+  const totalTokens = manageable
+    .filter(s => finalSelectedIds.includes(s.id))
     .reduce((acc, curr) => acc + curr.estimatedTokens, 0);
 
   p.note(
-    `Seçilen Yetenek Sayısı: ${pc.green(newSelectedIds.length.toString())} / ${allSkills.length}\nTahmini Token Yükü: ${pc.yellow(`~${totalTokens} token`)}`,
-    'Mevcut Durum'
+    `Aktif 3rd-Party: ${pc.green(finalSelectedIds.length.toString())} / ${manageable.length}\nTahmini Token Yükü: ${pc.yellow(`~${totalTokens} token`)}`,
+    'Yapılandırma Tamamlandı'
   );
 
-  p.outro(pc.green('✓ Seçimler diske işlendi.'));
+  p.outro(pc.green('✓ Seçilen mod başarıyla diske işlendi.'));
 }

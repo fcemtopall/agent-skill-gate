@@ -5,117 +5,148 @@ exports.deactivate = deactivate;
 const vscode = require("vscode");
 const fs = require("fs");
 const path = require("path");
-// Ortak Skill Havuzu (Projenin mock-skills'i ile uyumlu)
-const AVAILABLE_SKILLS = [
-    {
-        id: "git-manager",
-        name: "Git Safe Manager",
-        description: "Git diff analizi yapar, commit mesajı üretir ve branch durumunu inceler.",
-        estimatedTokens: 350
-    },
-    {
-        id: "postgres-inspector",
-        name: "PostgreSQL Schema Inspector",
-        description: "Tablo şemalarını okur, read-only SQL sorguları çalıştırır ve migration'ları inceler.",
-        estimatedTokens: 750
-    },
-    {
-        id: "stripe-mock",
-        name: "Stripe API Helper",
-        description: "Stripe webhook yüklerini simüle eder ve test ödeme akışlarını doğrular.",
-        estimatedTokens: 500
-    }
-];
-let statusBarItem;
+const os = require("os");
 function activate(context) {
-    // 1. Status Bar Öğesini Oluştur (Sağ altta yer alır)
-    statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-    statusBarItem.command = 'agentSkillGate.toggleSkills';
-    context.subscriptions.push(statusBarItem);
     const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (!workspaceFolders) {
+    if (!workspaceFolders)
         return;
-    }
-    const rootPath = workspaceFolders[0].uri.fsPath;
-    const configPath = path.join(rootPath, '.agent-skills.json');
-    // Status Bar'ı güncelleyen fonksiyon
-    function updateStatusBar() {
-        let activeCount = 0;
-        if (fs.existsSync(configPath)) {
-            try {
-                const data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-                activeCount = Array.isArray(data.activeSkillIds) ? data.activeSkillIds.length : 0;
-            }
-            catch {
-                // Okuma hatasında 0 kabul et
+    const projectRoot = workspaceFolders[0].uri.fsPath;
+    const configPath = path.join(projectRoot, '.agent-skills.json');
+    const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+    statusBarItem.command = 'agentSkillGate.manageSkills';
+    context.subscriptions.push(statusBarItem);
+    // 1. Bilinen CLI dizinlerini tara (Claude, Gemini, Antigravity)
+    function scanDiscoveredCapabilities() {
+        const home = os.homedir();
+        const targets = [
+            { name: 'claude', base: path.join(home, '.claude') },
+            { name: 'gemini', base: path.join(home, '.gemini') },
+            { name: 'antigravity', base: path.join(home, '.antigravity') }
+        ];
+        const builtIns = {
+            claude: ['help', 'init', 'config', 'login', 'logout', 'doctor', 'bug', 'compact', 'cost', 'clear'],
+            gemini: ['help', 'config', 'settings', 'update', 'undo', 'status', 'auth', 'version', 'workspace'],
+            antigravity: ['init', 'help', 'status', 'config', 'rules']
+        };
+        const results = [];
+        for (const target of targets) {
+            const subDirs = ['commands', 'hooks', 'rules'];
+            for (const sub of subDirs) {
+                const targetDir = path.join(target.base, sub);
+                if (!fs.existsSync(targetDir))
+                    continue;
+                try {
+                    const files = fs.readdirSync(targetDir);
+                    for (const file of files) {
+                        if (file.startsWith('.') && !file.includes('.asg-disabled'))
+                            continue;
+                        if (file.endsWith('.lock'))
+                            continue;
+                        const isCurrentlyDisabled = file.endsWith('.asg-disabled');
+                        const cleanFileName = isCurrentlyDisabled ? file.replace(/\.asg-disabled$/, '') : file;
+                        const canonicalPath = path.join(targetDir, cleanFileName);
+                        const baseName = path.parse(cleanFileName).name;
+                        if (builtIns[target.name]?.includes(baseName.toLowerCase()))
+                            continue;
+                        results.push({
+                            id: `${target.name}::${sub}::${baseName}`,
+                            label: `${baseName} (${target.name})`,
+                            description: `[${target.name.toUpperCase()} / ${sub}]`,
+                            canonicalPath
+                        });
+                    }
+                }
+                catch { }
             }
         }
-        statusBarItem.text = `$(circuit-board) Skills: ${activeCount} Aktif`;
-        statusBarItem.tooltip = "Agent Skillerini Aç/Kapat (Agent Skill Gate)";
+        return results;
+    }
+    // 2. Diskteki fiziksel isimleri senkronize et
+    function syncFilesOnDisk(capabilities, activeIds) {
+        for (const cap of capabilities) {
+            const shouldBeActive = activeIds.includes(cap.id);
+            const disabledPath = `${cap.canonicalPath}.asg-disabled`;
+            if (shouldBeActive) {
+                if (fs.existsSync(disabledPath)) {
+                    try {
+                        fs.renameSync(disabledPath, cap.canonicalPath);
+                    }
+                    catch { }
+                }
+            }
+            else {
+                if (fs.existsSync(cap.canonicalPath)) {
+                    try {
+                        fs.renameSync(cap.canonicalPath, disabledPath);
+                    }
+                    catch { }
+                }
+            }
+        }
+    }
+    // 3. Status Bar Rozetini Güncelle
+    function updateStatusBar() {
+        let activeIds = [];
+        if (fs.existsSync(configPath)) {
+            try {
+                const raw = fs.readFileSync(configPath, 'utf-8');
+                const data = JSON.parse(raw);
+                activeIds = data.activeSkillIds || [];
+            }
+            catch { }
+        }
+        statusBarItem.text = `$(circuit-board) Skills: ${activeIds.length} Aktif`;
+        statusBarItem.tooltip = `Agent Skill Gate: ${activeIds.length} adet 3rd-party yetenek devrede. Tıklayarak yönetin.`;
         statusBarItem.show();
     }
-    // İlk açılışta güncelle
-    updateStatusBar();
-    // Dosyayı izle: Terminalden bir şey değişirse VS Code'da anında yenilensin
-    const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(rootPath, '.agent-skills.json'));
+    // 4. QuickPick Yönetim Menüsü
+    const manageSkillsCommand = vscode.commands.registerCommand('agentSkillGate.manageSkills', async () => {
+        const capabilities = scanDiscoveredCapabilities();
+        if (capabilities.length === 0) {
+            vscode.window.showInformationMessage('Sistemde yönetilebilir 3rd-party CLI yeteneği bulunamadı.');
+            return;
+        }
+        let activeIds = [];
+        if (fs.existsSync(configPath)) {
+            try {
+                const raw = fs.readFileSync(configPath, 'utf-8');
+                const data = JSON.parse(raw);
+                activeIds = data.activeSkillIds || [];
+            }
+            catch { }
+        }
+        const quickPickItems = capabilities.map(cap => ({
+            label: cap.label,
+            description: cap.description,
+            picked: activeIds.includes(cap.id),
+            detail: cap.id
+        }));
+        const selected = await vscode.window.showQuickPick(quickPickItems, {
+            canPickMany: true,
+            placeHolder: 'Aktif etmek istediğiniz 3rd-party yetenekleri belirleyin (Seçilmeyenler kilitlenir):'
+        });
+        if (selected === undefined)
+            return;
+        const newActiveIds = selected.map(item => item.detail);
+        // Config dosyasını güncelle
+        const updatedConfig = {
+            version: "1.0.0",
+            activeSkillIds: newActiveIds,
+            updatedAt: new Date().toISOString()
+        };
+        fs.writeFileSync(configPath, JSON.stringify(updatedConfig, null, 2), 'utf-8');
+        // Diskteki dosya isimlerini (asg-disabled) anında eşitle
+        syncFilesOnDisk(capabilities, newActiveIds);
+        updateStatusBar();
+        vscode.window.showInformationMessage(`Agent Skill Gate: ${newActiveIds.length} yetenek güncellendi.`);
+    });
+    context.subscriptions.push(manageSkillsCommand);
+    // Dosya dışarıdan (terminal TUI üzerinden) değişirse status bar'ı otomatik tazele
+    const watcher = vscode.workspace.createFileSystemWatcher(configPath);
     watcher.onDidChange(() => updateStatusBar());
     watcher.onDidCreate(() => updateStatusBar());
     context.subscriptions.push(watcher);
-    // 2. Komut: QuickPick Menüsü Açma
-    const toggleCommand = vscode.commands.registerCommand('agentSkillGate.toggleSkills', async () => {
-        let activeSkillIds = [];
-        if (fs.existsSync(configPath)) {
-            try {
-                const raw = fs.readFileSync(configPath, 'utf8');
-                const parsed = JSON.parse(raw);
-                activeSkillIds = parsed.activeSkillIds || [];
-            }
-            catch {
-                activeSkillIds = [];
-            }
-        }
-        // Seçenekleri oluştur
-        const items = AVAILABLE_SKILLS.map(skill => {
-            const isActive = activeSkillIds.includes(skill.id);
-            return {
-                label: `${isActive ? '$(check) ' : '$(circle-slash) '} ${skill.name}`,
-                description: `[~${skill.estimatedTokens} tok]`,
-                detail: skill.description,
-                picked: isActive,
-                // Gizli id'yi saklamak için
-                alwaysShow: true
-            };
-        });
-        const selectedItem = await vscode.window.showQuickPick(items, {
-            placeHolder: 'Durumunu değiştirmek istediğiniz skill üzerine tıklayın',
-            matchOnDescription: true,
-            matchOnDetail: true
-        });
-        if (!selectedItem) {
-            return;
-        }
-        // Seçilen skill'i bul ve state'ini tersine çevir
-        const targetSkill = AVAILABLE_SKILLS.find(s => selectedItem.label.includes(s.name));
-        if (targetSkill) {
-            if (activeSkillIds.includes(targetSkill.id)) {
-                activeSkillIds = activeSkillIds.filter(id => id !== targetSkill.id);
-                vscode.window.showInformationMessage(`Devre dışı bırakıldı: ${targetSkill.name}`);
-            }
-            else {
-                activeSkillIds.push(targetSkill.id);
-                vscode.window.showInformationMessage(`Aktifleştirildi: ${targetSkill.name}`);
-            }
-            // Dosyaya yaz
-            const newState = {
-                version: "1.0.0",
-                activeSkillIds: activeSkillIds,
-                updatedAt: new Date().toISOString()
-            };
-            fs.writeFileSync(configPath, JSON.stringify(newState, null, 2), 'utf8');
-            updateStatusBar();
-        }
-    });
-    context.subscriptions.push(toggleCommand);
+    updateStatusBar();
 }
 function deactivate() { }
 //# sourceMappingURL=extension.js.map
