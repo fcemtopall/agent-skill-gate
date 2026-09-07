@@ -12,10 +12,9 @@ export interface ProfileDefinition {
 export const PROFILES: ProfileDefinition[] = [
   {
     id: 'prototyping',
-    label: '⚡ Hızlı Geliştirme (Fast Prototyping)',
-    description: 'Guard ve denetim hook\'ları kapalı. Maksimum hız ve minimum token tüketimi.',
+    label: '⚡ Fast Prototyping',
+    description: 'Bypasses guard and audit hooks for maximum speed and minimal token consumption.',
     filter: (cap) => {
-      // Guard, injection-scanner ve check worker gibi ağır hook'ları dışarıda bırak
       const lower = cap.canonicalFilePath.toLowerCase();
       const isHeavyHook = lower.includes('guard') || 
                           lower.includes('scanner') || 
@@ -26,14 +25,14 @@ export const PROFILES: ProfileDefinition[] = [
   },
   {
     id: 'audit',
-    label: '🛡️ Güvenlik ve Denetim (Full Guard & Audit)',
-    description: 'Tüm tarayıcılar, review kuralları ve commit kontrolleri devrede.',
-    filter: () => true // Bütün 3rd-party yetenekleri aç
+    label: '🛡️ Full Guard & Audit',
+    description: 'Enables all scanners, review workflows, and commit verification hooks.',
+    filter: () => true
   },
   {
     id: 'clean',
-    label: '🧹 Yalın Mod (Clean Slate)',
-    description: 'Tüm 3rd-party hook ve eklentiler kapalı. Yalnızca CLI yerleşik araçları devrede.',
-    filter: () => false // Hepsini kapat
+    label: '🧹 Clean Slate',
+    description: 'Disables all 3rd-party capabilities. Retains native built-in CLI commands only.',
+    filter: () => false
   }
 ];

@@ -15,8 +15,8 @@ export interface DiscoveredCapability {
   description: string;
   cliTarget: string;
   capabilityType: 'lifecycle-hook' | 'slash-command' | 'automation-script' | 'rule-manifest';
-  canonicalFilePath: string; // .asg-disabled olmadan orijinal dosya yolu
-  actualFilePath: string;    // Diskteki mevcut gerçek yolu
+  canonicalFilePath: string;
+  actualFilePath: string;
   isCurrentlyDisabled: boolean;
   isBuiltIn: boolean;
 }
@@ -40,7 +40,7 @@ export class PluginScanner {
         }
       }
     } catch {}
-    return 'Harici CLI yeteneği / betiği.';
+    return '3rd-party CLI capability / script.';
   }
 
   private scanDirectoryRecursive(
@@ -65,10 +65,7 @@ export class PluginScanner {
           if (entry.name.startsWith('.') && !entry.name.includes('.asg-disabled')) continue;
           if (entry.name.endsWith('.lock')) continue;
 
-          // Devre dışı kalmış bir dosya mı kontrol et
           const isCurrentlyDisabled = entry.name.endsWith('.asg-disabled');
-          
-          // Orijinal dosya adını ve uzantısını belirle
           const cleanFileName = isCurrentlyDisabled 
             ? entry.name.replace(/\.asg-disabled$/, '') 
             : entry.name;
@@ -77,7 +74,6 @@ export class PluginScanner {
           const ext = path.extname(cleanFileName);
           const baseName = path.parse(cleanFileName).name;
 
-          // Desteklenmeyen geçici dosyaları atla
           if (!['.md', '.sh', '.bash', '.js', '.mjs', '.py', ''].includes(ext)) {
             continue;
           }
