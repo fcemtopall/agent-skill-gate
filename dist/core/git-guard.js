@@ -5,7 +5,6 @@ export class GitGuard {
     constructor(projectRoot) {
         this.projectRoot = projectRoot;
     }
-    // .agent-skills.json dosyasını .gitignore'a otomatik ekle (Bozulma ve kirletmeyi engeller)
     ensureGitIgnore() {
         const gitignorePath = path.join(this.projectRoot, '.gitignore');
         const entry = '.agent-skills.json';
@@ -13,23 +12,21 @@ export class GitGuard {
             try {
                 const content = fs.readFileSync(gitignorePath, 'utf-8');
                 if (!content.includes(entry)) {
-                    fs.appendFileSync(gitignorePath, `\n# Agent Skill Gate Yerel Yapılandırması\n${entry}\n`);
+                    fs.appendFileSync(gitignorePath, `\n# Agent Skill Gate Local Workspace State\n${entry}\n`);
                 }
             }
             catch { }
         }
         else {
-            // .gitignore yoksa sadece git repo kontrolü yap
             const gitDir = path.join(this.projectRoot, '.git');
             if (fs.existsSync(gitDir)) {
                 try {
-                    fs.writeFileSync(gitignorePath, `# Agent Skill Gate Yerel Yapılandırması\n${entry}\n`, 'utf-8');
+                    fs.writeFileSync(gitignorePath, `# Agent Skill Gate Local Workspace State\n${entry}\n`, 'utf-8');
                 }
                 catch { }
             }
         }
     }
-    // Opsiyonel: Branch değişiminde profili hatırlamak için local branch hook'u
     getCurrentBranch() {
         const headPath = path.join(this.projectRoot, '.git', 'HEAD');
         if (!fs.existsSync(headPath))

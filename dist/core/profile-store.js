@@ -17,8 +17,8 @@ export class ProfileStore {
             const defaults = [
                 {
                     id: 'mvp-builder',
-                    name: '🚀 Seri Girişim / MVP',
-                    description: 'Hızlı prototipleme, hafif araçlar ve temel iş akışları devrede.',
+                    name: '🚀 Lean MVP Builder',
+                    description: 'Optimized preset for rapid iteration and essential tooling.',
                     skillIds: []
                 }
             ];

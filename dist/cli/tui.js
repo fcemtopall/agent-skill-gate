@@ -10,10 +10,9 @@ export async function showSkillSelector(stateManager) {
     const { manageable, builtInCount, details } = scanner.scanManageable();
     const profileStore = new ProfileStore();
     if (builtInCount > 0) {
-        p.log.success(pc.dim(`${builtInCount} adet yerleşik CLI komutu aktif ve koruma altında.`));
+        p.log.success(pc.dim(`${builtInCount} native CLI commands protected and enabled.`));
     }
     const userProfiles = profileStore.getProfiles();
-    // Menü Seçenekleri
     const menuOptions = [
         ...PROFILES.map(prof => ({
             value: `builtin:${prof.id}`,
@@ -23,46 +22,45 @@ export async function showSkillSelector(stateManager) {
         ...userProfiles.map(u => ({
             value: `custom:${u.id}`,
             label: pc.cyan(u.name),
-            hint: `${u.description} (${u.skillIds.length} yetenek)`
+            hint: `${u.description} (${u.skillIds.length} capabilities)`
         })),
         {
             value: 'action:create',
-            label: pc.green('➕ Yeni Özel Profil Oluştur'),
-            hint: 'Belirlediğiniz skilleri bir profil olarak kaydedin.'
+            label: pc.green('➕ Create Custom Profile'),
+            hint: 'Bundle selected skills into a reusable profile preset.'
         },
         {
             value: 'action:manual',
-            label: '⚙️ Tek Seferlik Manuel Seçim',
-            hint: 'Kayıt yapmadan anlık checkbox listesini açar.'
+            label: '⚙️ Manual Selection (One-off)',
+            hint: 'Customize active skills individually.'
         }
     ];
     const selection = await p.select({
-        message: 'Çalışma modunu veya profilinizi belirleyin:',
+        message: 'Select execution profile or preset:',
         options: menuOptions
     });
     if (p.isCancel(selection)) {
-        p.cancel('İşlem iptal edildi.');
+        p.cancel('Operation cancelled.');
         process.exit(0);
     }
     const choice = selection;
     let targetSkillIds = [];
-    // 1. Yeni Profil Oluşturma Akışı
     if (choice === 'action:create') {
         const profileName = await p.text({
-            message: 'Profil Adı:',
-            placeholder: 'örn: 🚀 Seri Girişim / MVP',
-            validate: (v) => (!v.trim() ? 'Profil adı boş bırakılamaz.' : undefined)
+            message: 'Profile Name:',
+            placeholder: 'e.g. 🚀 Fullstack Rapid',
+            validate: (v) => (!v.trim() ? 'Profile name cannot be empty.' : undefined)
         });
         if (p.isCancel(profileName))
             return;
         const profileDesc = await p.text({
-            message: 'Profil Açıklaması:',
-            placeholder: 'örn: MVP aşamasında hızlı ilerlemek için seçili araçlar.'
+            message: 'Profile Description:',
+            placeholder: 'e.g. Optimized stack for full-stack prototyping.'
         });
         if (p.isCancel(profileDesc))
             return;
         const skillChoices = await p.multiselect({
-            message: 'Bu profile dahil edilecek yetenekleri seçin:',
+            message: 'Select capabilities to include in this profile:',
             options: manageable.map(s => ({
                 value: s.id,
                 label: s.name,
@@ -74,34 +72,28 @@ export async function showSkillSelector(stateManager) {
         const newProfile = {
             id: profileName.toLowerCase().replace(/[^a-z0-9]/g, '-'),
             name: profileName,
-            description: profileDesc || 'Özel kullanıcı profili.',
+            description: profileDesc || 'Custom user profile.',
             skillIds: skillChoices
         };
         profileStore.saveProfile(newProfile);
-        p.log.success(pc.green(`'${newProfile.name}' profili başarıyla kaydedildi!`));
+        p.log.success(pc.green(`Profile '${newProfile.name}' saved successfully!`));
         targetSkillIds = newProfile.skillIds;
     }
-    // 2. Kullanıcı Özel Profilini Uygulama
     else if (choice.startsWith('custom:')) {
         const profileId = choice.replace('custom:', '');
         const profile = userProfiles.find(u => u.id === profileId);
-        if (profile) {
+        if (profile)
             targetSkillIds = profile.skillIds;
-        }
     }
-    // 3. Sistem Dahili Modları
     else if (choice.startsWith('builtin:')) {
         const builtinId = choice.replace('builtin:', '');
         const profile = PROFILES.find(p => p.id === builtinId);
-        targetSkillIds = details
-            .filter(cap => profile.filter(cap))
-            .map(cap => cap.id);
+        targetSkillIds = details.filter(cap => profile.filter(cap)).map(cap => cap.id);
     }
-    // 4. Manuel Anlık Seçim
     else {
         const activeIds = stateManager.getActiveSkills();
         const manualSelected = await p.multiselect({
-            message: 'Aktif edilecek yetenekleri belirleyin:',
+            message: 'Toggle capabilities for current workspace:',
             options: manageable.map(s => ({
                 value: s.id,
                 label: s.name,
@@ -114,7 +106,6 @@ export async function showSkillSelector(stateManager) {
             return;
         targetSkillIds = manualSelected;
     }
-    // State senkronizasyonu
     for (const skill of manageable) {
         const shouldBeActive = targetSkillIds.includes(skill.id);
         const isCurrentlyActive = stateManager.isSkillActive(skill.id);
@@ -125,6 +116,6 @@ export async function showSkillSelector(stateManager) {
     const totalTokens = manageable
         .filter(s => targetSkillIds.includes(s.id))
         .reduce((acc, curr) => acc + curr.estimatedTokens, 0);
-    p.note(`Aktif Yetenek: ${pc.green(targetSkillIds.length.toString())} / ${manageable.length}\nTahmini Token Yükü: ${pc.yellow(`~${totalTokens} token`)}`, 'Yapılandırma Uygulandı');
-    p.outro(pc.green('✓ Seçimler başarıyla senkronize edildi.'));
+    p.note(`Active Capabilities: ${pc.green(targetSkillIds.length.toString())} / ${manageable.length}\nEstimated Context Overhead: ${pc.yellow(`~${totalTokens} tokens`)}`, 'Session Configuration');
+    p.outro(pc.green('✓ Workspace state synchronized.'));
 }

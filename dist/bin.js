@@ -12,14 +12,12 @@ const stateManager = new StateManager(projectRoot);
 const symlinkManager = new SymlinkManager();
 const gitGuard = new GitGuard(projectRoot);
 async function run() {
-    // Projedeki .gitignore kontrolünü sessizce yap
     gitGuard.ensureGitIgnore();
     const scanner = new PluginScanner();
     const { details } = scanner.scanManageable();
-    // PANİK / RESET MODU
     if (args.includes('--reset') || args.includes('reset')) {
         symlinkManager.restoreAll(details);
-        console.log('✓ Sistemdeki tüm 3rd-party CLI yetenekleri orijinal haline getirildi.');
+        console.log('✓ All 3rd-party CLI capabilities restored to original state.');
         process.exit(0);
     }
     const allSkills = SkillCatalog.getSkills();
@@ -35,6 +33,6 @@ async function run() {
     await showSkillSelector(stateManager);
 }
 run().catch((err) => {
-    console.error('[HATA]', err.message);
+    console.error('[ERROR]', err.message);
     process.exit(1);
 });
