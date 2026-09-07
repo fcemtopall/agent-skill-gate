@@ -6,20 +6,22 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { StateManager } from '../core/state-manager.js';
 import { SkillDefinition } from '../core/types.js';
+import { ProcessManager } from './process-manager.js';
 
 export class DynamicMcpGateway {
   private server: Server;
   private stateManager: StateManager;
+  private processManager: ProcessManager;
   private registeredSkills: Map<string, SkillDefinition> = new Map();
 
   constructor(stateManager: StateManager, skills: SkillDefinition[]) {
     this.stateManager = stateManager;
+    this.processManager = new ProcessManager();
+
     for (const skill of skills) {
       this.registeredSkills.set(skill.id, skill);
     }
 
-    // MCP sunucusunu tanımlıyoruz
-    // tools.listChanged: true özelliği agent'a "benim tool listem dinamik değişebilir" mesajı verir
     this.server = new Server(
       { name: "skill-gateway", version: "1.0.0" },
       { capabilities: { tools: { listChanged: true } } }
@@ -27,10 +29,11 @@ export class DynamicMcpGateway {
 
     this.bindHandlers();
     this.listenStateChanges();
+    this.registerProcessGuards();
   }
 
   private bindHandlers(): void {
-    // 1. Agent "Hangi toolların var?" dediğinde çağrılan handler
+    // 1. Tool Listesi
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       const activeIds = this.stateManager.getActiveSkills();
       const tools = [];
@@ -38,7 +41,6 @@ export class DynamicMcpGateway {
       for (const id of activeIds) {
         const skill = this.registeredSkills.get(id);
         if (skill) {
-          // Namespace kuralı: skill_id__action biçiminde çakışma önlenir
           tools.push({
             name: `${skill.id}__exec`,
             description: `[${skill.name}]: ${skill.description}`,
@@ -58,13 +60,12 @@ export class DynamicMcpGateway {
       return { tools };
     });
 
-    // 2. Agent bir tool'u çalıştırmak istediğinde çağrılan handler
+    // 2. Tool Çalıştırma (Gerçek Sürece İletim)
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const toolName = request.params.name;
       const [skillId] = toolName.split('__');
       const activeIds = this.stateManager.getActiveSkills();
 
-      // Disaster Pattern Önlemi: Tool deaktif edildiyse ama agent eski context'ten çağırmaya kalkarsa
       if (!activeIds.includes(skillId)) {
         return {
           content: [{
@@ -76,24 +77,59 @@ export class DynamicMcpGateway {
       }
 
       const targetSkill = this.registeredSkills.get(skillId);
+      if (!targetSkill) {
+        return {
+          content: [{ type: "text", text: `[GATEWAY ERROR]: '${skillId}' tanımı bulunamadı.` }],
+          isError: true
+        };
+      }
 
-      // Simülasyon: Skill aktifse operasyon başarılı döner
+      // Alt süreci hazırla / başlat
+      const child = this.processManager.startSkillProcess(targetSkill);
+      if (!child) {
+        return {
+          content: [{ type: "text", text: `[GATEWAY ERROR]: '${skillId}' process başlatılamadı.` }],
+          isError: true
+        };
+      }
+
       return {
         content: [{ 
           type: "text", 
-          text: `[${targetSkill?.name} Başarılı]: Parametreler alındı, işlem yürütüldü.` 
+          text: `[${targetSkill.name} - CANLI PROCESS]: Süreç çalışır durumda (PID: ${child.pid}). Parametre iletildi.` 
         }]
       };
     });
   }
 
   private listenStateChanges(): void {
-    // State değiştiğinde agent'a "tool listem güncellendi, tekrar iste" sinyali fırlatılır
-    this.stateManager.on('change', () => {
+    this.stateManager.on('change', (newState) => {
+      const activeIds = newState.activeSkillIds;
+
+      // Kapatılan skillerin arka plan process'lerini temizle
+      for (const [id] of this.registeredSkills) {
+        if (!activeIds.includes(id)) {
+          this.processManager.stopSkillProcess(id);
+        }
+      }
+
+      // Agent'a listenin değiştiğini bildir
       this.server.notification({
         method: "notifications/tools/list_changed"
       });
     });
+  }
+
+  // Terminal kapatıldığında veya Ctrl+C yapıldığında tüm alt süreçleri öldür
+  private registerProcessGuards(): void {
+    const cleanup = () => {
+      this.processManager.killAll();
+      process.exit(0);
+    };
+
+    process.on('SIGINT', cleanup);
+    process.on('SIGTERM', cleanup);
+    process.on('beforeExit', cleanup);
   }
 
   public async start(): Promise<void> {
