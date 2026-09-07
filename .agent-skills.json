@@ -2,7 +2,9 @@
   "version": "1.0.0",
   "activeSkillIds": [
     "git-manager",
-    "postgres-inspector"
+    "postgres-inspector",
+    "gemini::hooks::gsd-context-monitor",
+    "gemini::hooks::gsd-phase-boundary"
   ],
-  "updatedAt": "2026-09-07T08:50:40.603Z"
+  "updatedAt": "2026-09-07T11:11:33.921Z"
 }

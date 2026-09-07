@@ -1,30 +1,27 @@
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
-import { AVAILABLE_SKILLS } from '../core/mock-skills.js';
-import { ProjectDiscovery } from '../core/discovery.js';
+import { SkillCatalog } from '../core/catalog.js';
 export async function showSkillSelector(stateManager) {
     console.clear();
     p.intro(pc.bgCyan(pc.black(' AGENT SKILL GATE ')));
-    // Proje stack taramasını yap
-    const discovery = new ProjectDiscovery(process.cwd());
-    const { recommendedSkillIds, reasons } = discovery.analyze();
+    const allSkills = SkillCatalog.getSkills();
+    const builtInCount = SkillCatalog.builtInCount;
+    if (builtInCount > 0) {
+        p.log.success(pc.dim(`${builtInCount} adet yerleşik CLI komutu aktif ve kilitli.`));
+    }
+    // Sadece kullanıcının önceden bilerek açtığı skilleri getir
     const activeIds = stateManager.getActiveSkills();
-    // İlk defa çalışıyorsa ve aktif skill yoksa, önerilenleri varsayılan olarak seç
-    const initialSelections = activeIds.length === 0 ? recommendedSkillIds : activeIds;
-    const options = AVAILABLE_SKILLS.map((skill) => {
-        const isRecommended = recommendedSkillIds.includes(skill.id);
-        const badge = isRecommended ? pc.bgGreen(pc.black(' ÖNERİLEN ')) + ' ' : '';
-        const reasonText = isRecommended ? ` ↳ ${pc.italic(reasons[skill.id])}` : '';
+    const options = allSkills.map((skill) => {
         return {
             value: skill.id,
-            label: `${badge}${pc.bold(skill.name)}`,
-            hint: `${pc.dim(skill.description)} ${pc.yellow(`[~${skill.estimatedTokens} tok]`)}${reasonText ? pc.cyan(reasonText) : ''}`
+            label: pc.bold(skill.name),
+            hint: `${pc.dim(skill.description)} ${pc.yellow(`[~${skill.estimatedTokens} tok]`)}`
         };
     });
     const selected = await p.multiselect({
-        message: 'Bu oturumda aktif olacak agent skillerini seçin:',
+        message: `Açmak veya kapatmak istediğiniz 3rd-party yetenekleri belirleyin:`,
         options: options,
-        initialValues: initialSelections,
+        initialValues: activeIds, // Öneri yok, ne açıksa sadece o seçili gelir
         required: false
     });
     if (p.isCancel(selected)) {
@@ -32,16 +29,17 @@ export async function showSkillSelector(stateManager) {
         process.exit(0);
     }
     const newSelectedIds = selected;
-    for (const skill of AVAILABLE_SKILLS) {
+    // Kullanıcının manuel seçimine göre state'i güncelle
+    for (const skill of allSkills) {
         const shouldBeActive = newSelectedIds.includes(skill.id);
         const isCurrentlyActive = stateManager.isSkillActive(skill.id);
         if (shouldBeActive !== isCurrentlyActive) {
             stateManager.toggleSkill(skill.id);
         }
     }
-    const totalTokens = AVAILABLE_SKILLS
+    const totalTokens = allSkills
         .filter(s => newSelectedIds.includes(s.id))
         .reduce((acc, curr) => acc + curr.estimatedTokens, 0);
-    p.note(`Aktif Skill Sayısı: ${pc.green(newSelectedIds.length.toString())}\nTahmini Token Yükü: ${pc.yellow(`~${totalTokens} token`)}`, 'Oturum Yapılandırması');
-    p.outro(pc.green('✓ Skiller başarıyla güncellendi!'));
+    p.note(`Seçilen Yetenek Sayısı: ${pc.green(newSelectedIds.length.toString())} / ${allSkills.length}\nTahmini Token Yükü: ${pc.yellow(`~${totalTokens} token`)}`, 'Mevcut Durum');
+    p.outro(pc.green('✓ Seçimler diske işlendi.'));
 }

@@ -1,19 +1,35 @@
 #!/usr/bin/env node
 import { StateManager } from './core/state-manager.js';
 import { showSkillSelector } from './cli/tui.js';
-import { AVAILABLE_SKILLS } from './core/mock-skills.js';
+import { SkillCatalog } from './core/catalog.js';
 import { DynamicMcpGateway } from './gateway/mcp-proxy.js';
+import { SymlinkManager } from './core/symlink-manager.js';
+import { PluginScanner } from './harvester/scanner.js';
 const args = process.argv.slice(2);
 const projectRoot = process.cwd();
 const stateManager = new StateManager(projectRoot);
+const symlinkManager = new SymlinkManager();
 async function run() {
-    // Eğer argüman olarak "serve" verilirse doğrudan MCP Gateway çalışır (Cursor / Claude bağlamak için)
+    const scanner = new PluginScanner();
+    const { details } = scanner.scanManageable();
+    // PANİK / RESET MODU: Bütün devre dışı bırakılmış dosyaları orijinal haline çevirir
+    if (args.includes('--reset') || args.includes('reset')) {
+        symlinkManager.restoreAll(details);
+        console.log('✓ Sistemdeki tüm 3rd-party CLI yetenekleri orijinal haline getirildi.');
+        process.exit(0);
+    }
+    const allSkills = SkillCatalog.getSkills();
+    // State değişimini diske yansıt
+    stateManager.on('change', (newState) => {
+        symlinkManager.syncState(details, newState.activeSkillIds);
+    });
+    // Başlangıçta da o anki kayıtlı state neyse diskteki dosyaları onunla eşitle
+    symlinkManager.syncState(details, stateManager.getActiveSkills());
     if (args.includes('--serve') || args.includes('serve')) {
-        const gateway = new DynamicMcpGateway(stateManager, AVAILABLE_SKILLS);
+        const gateway = new DynamicMcpGateway(stateManager, allSkills);
         await gateway.start();
         return;
     }
-    // Argümansız çağrılırsa interaktif TUI seçim ekranı açılır
     await showSkillSelector(stateManager);
 }
 run().catch((err) => {
