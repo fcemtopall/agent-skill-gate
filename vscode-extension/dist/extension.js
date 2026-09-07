@@ -15,7 +15,6 @@ function activate(context) {
     const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     statusBarItem.command = 'agentSkillGate.manageSkills';
     context.subscriptions.push(statusBarItem);
-    // 1. Bilinen CLI dizinlerini tara (Claude, Gemini, Antigravity)
     function scanDiscoveredCapabilities() {
         const home = os.homedir();
         const targets = [
@@ -61,7 +60,6 @@ function activate(context) {
         }
         return results;
     }
-    // 2. Diskteki fiziksel isimleri senkronize et
     function syncFilesOnDisk(capabilities, activeIds) {
         for (const cap of capabilities) {
             const shouldBeActive = activeIds.includes(cap.id);
@@ -84,7 +82,6 @@ function activate(context) {
             }
         }
     }
-    // 3. Status Bar Rozetini Güncelle
     function updateStatusBar() {
         let activeIds = [];
         if (fs.existsSync(configPath)) {
@@ -95,53 +92,91 @@ function activate(context) {
             }
             catch { }
         }
-        statusBarItem.text = `$(circuit-board) Skills: ${activeIds.length} Aktif`;
-        statusBarItem.tooltip = `Agent Skill Gate: ${activeIds.length} adet 3rd-party yetenek devrede. Tıklayarak yönetin.`;
+        statusBarItem.text = `$(circuit-board) Skills: ${activeIds.length} Active`;
+        statusBarItem.tooltip = `Agent Skill Gate: ${activeIds.length} capabilities enabled. Click to toggle.`;
         statusBarItem.show();
     }
-    // 4. QuickPick Yönetim Menüsü
     const manageSkillsCommand = vscode.commands.registerCommand('agentSkillGate.manageSkills', async () => {
         const capabilities = scanDiscoveredCapabilities();
         if (capabilities.length === 0) {
-            vscode.window.showInformationMessage('Sistemde yönetilebilir 3rd-party CLI yeteneği bulunamadı.');
+            vscode.window.showInformationMessage('No manageable 3rd-party CLI capabilities found.');
             return;
         }
-        let activeIds = [];
-        if (fs.existsSync(configPath)) {
+        const home = os.homedir();
+        const profilesPath = path.join(home, '.agent-skill-gate', 'profiles.json');
+        let userProfiles = [];
+        if (fs.existsSync(profilesPath)) {
             try {
-                const raw = fs.readFileSync(configPath, 'utf-8');
-                const data = JSON.parse(raw);
-                activeIds = data.activeSkillIds || [];
+                userProfiles = JSON.parse(fs.readFileSync(profilesPath, 'utf-8'));
             }
             catch { }
         }
-        const quickPickItems = capabilities.map(cap => ({
-            label: cap.label,
-            description: cap.description,
-            picked: activeIds.includes(cap.id),
-            detail: cap.id
-        }));
-        const selected = await vscode.window.showQuickPick(quickPickItems, {
-            canPickMany: true,
-            placeHolder: 'Aktif etmek istediğiniz 3rd-party yetenekleri belirleyin (Seçilmeyenler kilitlenir):'
+        const quickPickOptions = [
+            { label: '⚡ Fast Prototyping', description: 'Disables heavy audit/guard hooks.', detail: 'builtin:prototyping' },
+            { label: '🛡️ Full Guard & Audit', description: 'Enables all safety and review hooks.', detail: 'builtin:audit' },
+            { label: '🧹 Clean Slate', description: 'Zero 3rd-party overhead.', detail: 'builtin:clean' },
+            ...userProfiles.map(u => ({
+                label: `📁 ${u.name}`,
+                description: u.description,
+                detail: `custom:${u.id}`
+            })),
+            { label: '⚙️ Manual Selection', description: 'Toggle capabilities individually.', detail: 'manual' }
+        ];
+        const profileChoice = await vscode.window.showQuickPick(quickPickOptions, {
+            placeHolder: 'Select active profile or custom preset:'
         });
-        if (selected === undefined)
+        if (!profileChoice || !profileChoice.detail)
             return;
-        const newActiveIds = selected.map(item => item.detail);
-        // Config dosyasını güncelle
+        let newActiveIds = [];
+        if (profileChoice.detail.startsWith('custom:')) {
+            const pId = profileChoice.detail.replace('custom:', '');
+            const selectedProfile = userProfiles.find(u => u.id === pId);
+            newActiveIds = selectedProfile ? selectedProfile.skillIds : [];
+        }
+        else if (profileChoice.detail === 'builtin:clean') {
+            newActiveIds = [];
+        }
+        else if (profileChoice.detail === 'builtin:audit') {
+            newActiveIds = capabilities.map(c => c.id);
+        }
+        else if (profileChoice.detail === 'builtin:prototyping') {
+            newActiveIds = capabilities
+                .filter(c => {
+                const lower = c.canonicalPath.toLowerCase();
+                return !lower.includes('guard') && !lower.includes('scanner') && !lower.includes('audit') && !lower.includes('check');
+            })
+                .map(c => c.id);
+        }
+        else {
+            let currentActiveIds = [];
+            if (fs.existsSync(configPath)) {
+                try {
+                    const raw = fs.readFileSync(configPath, 'utf-8');
+                    currentActiveIds = JSON.parse(raw).activeSkillIds || [];
+                }
+                catch { }
+            }
+            const selected = await vscode.window.showQuickPick(capabilities.map(cap => ({
+                label: cap.label,
+                description: cap.description,
+                picked: currentActiveIds.includes(cap.id),
+                detail: cap.id
+            })), { canPickMany: true, placeHolder: 'Toggle capabilities:' });
+            if (selected === undefined)
+                return;
+            newActiveIds = selected.map(s => s.detail);
+        }
         const updatedConfig = {
             version: "1.0.0",
             activeSkillIds: newActiveIds,
             updatedAt: new Date().toISOString()
         };
         fs.writeFileSync(configPath, JSON.stringify(updatedConfig, null, 2), 'utf-8');
-        // Diskteki dosya isimlerini (asg-disabled) anında eşitle
         syncFilesOnDisk(capabilities, newActiveIds);
         updateStatusBar();
-        vscode.window.showInformationMessage(`Agent Skill Gate: ${newActiveIds.length} yetenek güncellendi.`);
+        vscode.window.showInformationMessage(`Agent Skill Gate: ${profileChoice.label} applied (${newActiveIds.length} active).`);
     });
     context.subscriptions.push(manageSkillsCommand);
-    // Dosya dışarıdan (terminal TUI üzerinden) değişirse status bar'ı otomatik tazele
     const watcher = vscode.workspace.createFileSystemWatcher(configPath);
     watcher.onDidChange(() => updateStatusBar());
     watcher.onDidCreate(() => updateStatusBar());
