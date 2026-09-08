@@ -7,6 +7,7 @@ export interface WorkspaceSkillConfig {
   version: string;
   activeSkillIds: string[];
   branchProfiles?: BranchProfileMapping;
+  branchStates?: Record<string, string[]>; // Her dalın son aktif yetenek listesi
   updatedAt: string;
 }
 

@@ -48,9 +48,15 @@ export async function runTui(stateManager, symlinkManager, profileStore, capabil
             return;
         }
         const targetIds = selected;
-        stateManager.setActiveSkills(targetIds);
+        // Dal hafızasına yaz
+        if (currentBranch) {
+            stateManager.saveBranchSnapshot(currentBranch, targetIds);
+        }
+        else {
+            stateManager.setActiveSkills(targetIds);
+        }
         applyState(symlinkManager, capabilities, targetIds);
-        p.outro(pc.green(`✓ Enabled ${targetIds.length} capabilities successfully.`));
+        p.outro(pc.green(`✓ Saved ${targetIds.length} capabilities for branch [${currentBranch || 'detached'}].`));
         return;
     }
     // --- 2. PROFİL SEÇİMİ ---
@@ -84,9 +90,15 @@ export async function runTui(stateManager, symlinkManager, profileStore, capabil
             if (custom)
                 targetIds = custom.skillIds;
         }
-        stateManager.setActiveSkills(targetIds);
+        // Dal hafızasına yaz
+        if (currentBranch) {
+            stateManager.saveBranchSnapshot(currentBranch, targetIds);
+        }
+        else {
+            stateManager.setActiveSkills(targetIds);
+        }
         applyState(symlinkManager, capabilities, targetIds);
-        p.outro(pc.green(`✓ Switched to profile "${selectedProfileId}".`));
+        p.outro(pc.green(`✓ Switched branch [${currentBranch || 'detached'}] to profile "${selectedProfileId}".`));
         return;
     }
     // --- 3. DAL BAZLI OTOMATİK GEÇİŞ AYARLARI ---

@@ -26,22 +26,31 @@ export async function runCli(args) {
     const scanner = new PluginScanner();
     const scanResult = scanner.scanManageable();
     const capabilities = scanResult.details;
-    // 1. Reset / Panic Modu: Tüm symlink ve dosyaları varsayılan haline döndürür
+    // 1. Reset / Panic Modu
     if (args.includes('--reset') || args.includes('--panic')) {
         symlinkManager.restoreAll(capabilities);
         stateManager.setActiveSkills([]);
         console.log(pc.green('✓ All agent capabilities have been restored to their default state.'));
         return;
     }
-    // 2. Background Watcher Modu: Git dal değişimlerinde profili arka planda otomatik uygular
+    // 2. Background Watcher Modu
     if (args.includes('--watch')) {
         console.log(pc.cyan('ℹ Agent Skill Gate branch watcher active. Waiting for git branch changes...'));
         gitGuard.watchBranchChanges();
-        gitGuard.on('branchChange', ({ to }) => {
+        gitGuard.on('branchChange', ({ from, to }) => {
             console.log(pc.yellow(`\n⎇ Branch switched to: ${to}`));
+            // 1. ÖNCELİK: Bu dal için daha önceden kaydedilmiş bir snapshot var mı?
+            const savedSnapshot = stateManager.getBranchSnapshot(to);
+            if (savedSnapshot !== null) {
+                stateManager.setActiveSkills(savedSnapshot);
+                applyState(symlinkManager, capabilities, savedSnapshot);
+                console.log(pc.green(`✓ Restored branch memory state: ${savedSnapshot.length} capabilities active.`));
+                return;
+            }
+            // 2. ÖNCELİK: Bu dal için bir profil kuralı eşleşiyor mu?
             const targetProfile = stateManager.resolveProfileForBranch(to);
             if (targetProfile) {
-                console.log(pc.cyan(`➔ Applying mapped profile: ${targetProfile}`));
+                console.log(pc.cyan(`➔ Initializing branch from profile rule: ${targetProfile}`));
                 let targetIds = [];
                 const builtin = PROFILES.find((p) => p.id === targetProfile);
                 if (builtin) {
@@ -52,15 +61,17 @@ export async function runCli(args) {
                     if (custom)
                         targetIds = custom.skillIds;
                 }
-                stateManager.setActiveSkills(targetIds);
+                // Bu dalın ilk snapshot'ı olarak kaydet
+                stateManager.saveBranchSnapshot(to, targetIds);
                 applyState(symlinkManager, capabilities, targetIds);
-                console.log(pc.green(`✓ Autoswitched to "${targetProfile}" with ${targetIds.length} active capabilities.`));
+                console.log(pc.green(`✓ Applied profile "${targetProfile}" (${targetIds.length} capabilities) and saved snapshot.`));
+                return;
             }
-            else {
-                console.log(pc.dim('No profile rule matched for this branch. Retaining current capability state.'));
-            }
+            // 3. ÖNCELİK: Ne kural ne hafıza var; mevcut durumu bu dala kopyalayarak koru
+            const currentActive = stateManager.getActiveSkills();
+            stateManager.saveBranchSnapshot(to, currentActive);
+            console.log(pc.dim(`No profile rule or previous memory for [${to}]. Inherited ${currentActive.length} active capabilities.`));
         });
-        // Node.js sürecinin açık kalmasını sağlar
         process.stdin.resume();
         return;
     }

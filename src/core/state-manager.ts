@@ -19,7 +19,7 @@ export class StateManager extends EventEmitter {
         const content = fs.readFileSync(this.configPath, 'utf-8');
         return JSON.parse(content);
       } catch {
-        // Hatalı veya bozuk json durumunda default'a düş
+        // Hata durumunda varsayılan yapıya dön
       }
     }
 
@@ -27,6 +27,7 @@ export class StateManager extends EventEmitter {
       version: '1.1.0',
       activeSkillIds: [],
       branchProfiles: {},
+      branchStates: {},
       updatedAt: new Date().toISOString()
     };
   }
@@ -50,20 +51,22 @@ export class StateManager extends EventEmitter {
     this.saveState();
   }
 
-  public toggleSkill(skillId: string): boolean {
-    const index = this.state.activeSkillIds.indexOf(skillId);
-    let isActive = false;
+  // --- Branch Memory API ---
 
-    if (index >= 0) {
-      this.state.activeSkillIds.splice(index, 1);
-      isActive = false;
-    } else {
-      this.state.activeSkillIds.push(skillId);
-      isActive = true;
+  public saveBranchSnapshot(branch: string, skillIds: string[]): void {
+    if (!this.state.branchStates) {
+      this.state.branchStates = {};
     }
-
+    this.state.branchStates[branch] = [...skillIds];
+    this.state.activeSkillIds = [...skillIds];
     this.saveState();
-    return isActive;
+  }
+
+  public getBranchSnapshot(branch: string): string[] | null {
+    if (this.state.branchStates && Array.isArray(this.state.branchStates[branch])) {
+      return [...this.state.branchStates[branch]];
+    }
+    return null;
   }
 
   // --- Branch Profile Mapping API ---
@@ -87,14 +90,11 @@ export class StateManager extends EventEmitter {
     }
   }
 
-  // Aktif branch için geçerli bir profil var mı? (Wildcard destekli)
   public resolveProfileForBranch(branchName: string): string | null {
     const mappings = this.getBranchMappings();
-    
-    // 1. Birebir eşleşme
+
     if (mappings[branchName]) return mappings[branchName];
 
-    // 2. Wildcard eşleşmeleri (örn: feat/* -> feat/login)
     for (const [pattern, profileId] of Object.entries(mappings)) {
       if (pattern.endsWith('*')) {
         const prefix = pattern.slice(0, -1);

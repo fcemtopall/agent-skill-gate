@@ -3,7 +3,7 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 export class GitGuard extends EventEmitter {
     projectRoot;
-    headWatcher = null;
+    gitWatcher = null;
     currentBranchCache = null;
     constructor(projectRoot) {
         super();
@@ -20,7 +20,9 @@ export class GitGuard extends EventEmitter {
                     fs.appendFileSync(gitignorePath, `\n# Agent Skill Gate Local Workspace State\n${entry}\n`);
                 }
             }
-            catch { }
+            catch {
+                // İzin veya dosya okuma hatası durumunda sessizce devam et
+            }
         }
         else {
             const gitDir = path.join(this.projectRoot, '.git');
@@ -28,7 +30,9 @@ export class GitGuard extends EventEmitter {
                 try {
                     fs.writeFileSync(gitignorePath, `# Agent Skill Gate Local Workspace State\n${entry}\n`, 'utf-8');
                 }
-                catch { }
+                catch {
+                    // İzin hatasında sessizce geç
+                }
             }
         }
     }
@@ -41,32 +45,37 @@ export class GitGuard extends EventEmitter {
             if (content.startsWith('ref: refs/heads/')) {
                 return content.replace('ref: refs/heads/', '');
             }
-            // Detached HEAD durumu (commit hash döner)
+            // Detached HEAD durumu (kısa commit hash)
             return content.slice(0, 8);
         }
         catch {
             return null;
         }
     }
-    // Dal değişimlerini (git checkout / git switch) yakalar
     watchBranchChanges() {
         const gitDir = path.join(this.projectRoot, '.git');
-        const headPath = path.join(gitDir, 'HEAD');
-        if (!fs.existsSync(headPath))
+        if (!fs.existsSync(gitDir))
             return;
         try {
-            this.headWatcher = fs.watch(headPath, () => {
-                const newBranch = this.getCurrentBranch();
-                if (newBranch && newBranch !== this.currentBranchCache) {
-                    const oldBranch = this.currentBranchCache;
-                    this.currentBranchCache = newBranch;
-                    this.emit('branchChange', { from: oldBranch, to: newBranch });
+            // macOS ve Linux uyumlu: .git klasörünü izler, atomic rename / HEAD güncellemelerini yakalar
+            this.gitWatcher = fs.watch(gitDir, (_eventType, filename) => {
+                const fileNameStr = filename ? filename.toString() : '';
+                // HEAD dosyası veya refs altındaki değişikliklerde kontrol et
+                if (fileNameStr === 'HEAD' || fileNameStr.startsWith('refs') || fileNameStr === '') {
+                    const newBranch = this.getCurrentBranch();
+                    if (newBranch && newBranch !== this.currentBranchCache) {
+                        const oldBranch = this.currentBranchCache;
+                        this.currentBranchCache = newBranch;
+                        const eventData = { from: oldBranch, to: newBranch };
+                        this.emit('branchChange', eventData);
+                    }
                 }
             });
         }
-        catch { }
+        catch {
+            // Watcher açılamazsa süreci düşürme
+        }
     }
-    // Wildcard desteği: "feat/*" deseni "feat/auth" dalıyla eşleşir
     matchBranchPattern(currentBranch, pattern) {
         if (pattern === currentBranch)
             return true;
@@ -77,9 +86,9 @@ export class GitGuard extends EventEmitter {
         return false;
     }
     dispose() {
-        if (this.headWatcher) {
-            this.headWatcher.close();
-            this.headWatcher = null;
+        if (this.gitWatcher) {
+            this.gitWatcher.close();
+            this.gitWatcher = null;
         }
     }
 }

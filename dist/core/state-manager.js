@@ -16,13 +16,14 @@ export class StateManager extends EventEmitter {
                 return JSON.parse(content);
             }
             catch {
-                // Hatalı veya bozuk json durumunda default'a düş
+                // Hata durumunda varsayılan yapıya dön
             }
         }
         return {
             version: '1.1.0',
             activeSkillIds: [],
             branchProfiles: {},
+            branchStates: {},
             updatedAt: new Date().toISOString()
         };
     }
@@ -41,19 +42,20 @@ export class StateManager extends EventEmitter {
         this.state.activeSkillIds = [...skillIds];
         this.saveState();
     }
-    toggleSkill(skillId) {
-        const index = this.state.activeSkillIds.indexOf(skillId);
-        let isActive = false;
-        if (index >= 0) {
-            this.state.activeSkillIds.splice(index, 1);
-            isActive = false;
+    // --- Branch Memory API ---
+    saveBranchSnapshot(branch, skillIds) {
+        if (!this.state.branchStates) {
+            this.state.branchStates = {};
         }
-        else {
-            this.state.activeSkillIds.push(skillId);
-            isActive = true;
-        }
+        this.state.branchStates[branch] = [...skillIds];
+        this.state.activeSkillIds = [...skillIds];
         this.saveState();
-        return isActive;
+    }
+    getBranchSnapshot(branch) {
+        if (this.state.branchStates && Array.isArray(this.state.branchStates[branch])) {
+            return [...this.state.branchStates[branch]];
+        }
+        return null;
     }
     // --- Branch Profile Mapping API ---
     getBranchMappings() {
@@ -72,13 +74,10 @@ export class StateManager extends EventEmitter {
             this.saveState();
         }
     }
-    // Aktif branch için geçerli bir profil var mı? (Wildcard destekli)
     resolveProfileForBranch(branchName) {
         const mappings = this.getBranchMappings();
-        // 1. Birebir eşleşme
         if (mappings[branchName])
             return mappings[branchName];
-        // 2. Wildcard eşleşmeleri (örn: feat/* -> feat/login)
         for (const [pattern, profileId] of Object.entries(mappings)) {
             if (pattern.endsWith('*')) {
                 const prefix = pattern.slice(0, -1);
