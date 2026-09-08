@@ -1,10 +1,16 @@
 {
-  "name": "@fcemtopall/agent-skill-gate-vscode",
+  "name": "agent-skill-gate-vscode",
   "displayName": "Agent Skill Gate",
-  "description": "Agent skillerini tek tıkla açıp kapatan ve context yöneten kontrol paneli",
-  "version": "0.0.1",
+  "publisher": "fcemtopall",
+  "description": "Status bar integration and fast capability switcher for Agent Skill Gate",
+  "version": "1.0.1",
   "engines": {
     "vscode": "^1.85.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fcemtopall/agent-skill-gate"
   },
   "categories": [
     "Other"
