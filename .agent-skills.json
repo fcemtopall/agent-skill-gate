@@ -1,7 +1,21 @@
 {
   "version": "1.0.0",
   "activeSkillIds": [
-    "gemini::commands::gsd"
+    "gemini::hooks::gsd-check-update-worker",
+    "gemini::hooks::gsd-check-update",
+    "gemini::hooks::gsd-context-monitor",
+    "gemini::hooks::gsd-phase-boundary",
+    "gemini::hooks::gsd-prompt-guard",
+    "gemini::hooks::gsd-read-guard",
+    "gemini::hooks::gsd-read-injection-scanner",
+    "gemini::hooks::gsd-session-state",
+    "gemini::hooks::gsd-statusline",
+    "gemini::hooks::gsd-update-banner",
+    "gemini::hooks::gsd-validate-commit",
+    "gemini::hooks::gsd-workflow-guard"
   ],
-  "updatedAt": "2026-09-07T11:37:36.050Z"
+  "updatedAt": "2026-09-08T10:06:21.742Z",
+  "branchProfiles": {
+    "feat/*": "prototyping"
+  }
 }

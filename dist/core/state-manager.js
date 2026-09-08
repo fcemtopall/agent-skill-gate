@@ -8,55 +8,28 @@ export class StateManager extends EventEmitter {
         super();
         this.configPath = path.join(projectRoot, '.agent-skills.json');
         this.state = this.loadState();
-        this.watchFile();
     }
-    // Dosyayı oku; dosya yoksa veya bozuksa güvenli varsayılana dön
     loadState() {
-        if (!fs.existsSync(this.configPath)) {
-            const defaultState = {
-                version: "1.0.0",
-                activeSkillIds: [],
-                updatedAt: new Date().toISOString()
-            };
-            this.writeState(defaultState);
-            return defaultState;
-        }
-        try {
-            const raw = fs.readFileSync(this.configPath, 'utf-8');
-            const parsed = JSON.parse(raw);
-            // Veri şeması doğrulaması
-            if (Array.isArray(parsed.activeSkillIds)) {
-                return parsed;
+        if (fs.existsSync(this.configPath)) {
+            try {
+                const content = fs.readFileSync(this.configPath, 'utf-8');
+                return JSON.parse(content);
+            }
+            catch {
+                // Hatalı veya bozuk json durumunda default'a düş
             }
         }
-        catch {
-            // Disaster Pattern: Bozuk dosya okunursa hata fırlatmak yerine güvenli fallback üret
-            console.warn(`[UYARI] .agent-skills.json bozuk veya okunamadı, varsayılan profil yükleniyor.`);
-        }
         return {
-            version: "1.0.0",
+            version: '1.1.0',
             activeSkillIds: [],
+            branchProfiles: {},
             updatedAt: new Date().toISOString()
         };
     }
-    writeState(newState) {
-        try {
-            fs.writeFileSync(this.configPath, JSON.stringify(newState, null, 2), 'utf-8');
-        }
-        catch (err) {
-            console.error('[HATA] .agent-skills.json yazılamadı:', err);
-        }
-    }
-    watchFile() {
-        // Harici değişiklikleri (örn. VS Code eklentisi tarafından güncellendiğinde) 300ms aralıkla kontrol et
-        fs.watchFile(this.configPath, { interval: 300 }, () => {
-            const fresh = this.loadState();
-            // Yalnızca aktif ID listesi gerçekten değiştiyse event tetikle
-            if (JSON.stringify(fresh.activeSkillIds) !== JSON.stringify(this.state.activeSkillIds)) {
-                this.state = fresh;
-                this.emit('change', this.state);
-            }
-        });
+    saveState() {
+        this.state.updatedAt = new Date().toISOString();
+        fs.writeFileSync(this.configPath, JSON.stringify(this.state, null, 2), 'utf-8');
+        this.emit('stateChanged', this.state);
     }
     getActiveSkills() {
         return [...this.state.activeSkillIds];
@@ -64,17 +37,56 @@ export class StateManager extends EventEmitter {
     isSkillActive(skillId) {
         return this.state.activeSkillIds.includes(skillId);
     }
+    setActiveSkills(skillIds) {
+        this.state.activeSkillIds = [...skillIds];
+        this.saveState();
+    }
     toggleSkill(skillId) {
-        const exists = this.state.activeSkillIds.includes(skillId);
-        if (exists) {
-            this.state.activeSkillIds = this.state.activeSkillIds.filter(id => id !== skillId);
+        const index = this.state.activeSkillIds.indexOf(skillId);
+        let isActive = false;
+        if (index >= 0) {
+            this.state.activeSkillIds.splice(index, 1);
+            isActive = false;
         }
         else {
             this.state.activeSkillIds.push(skillId);
+            isActive = true;
         }
-        this.state.updatedAt = new Date().toISOString();
-        this.writeState(this.state);
-        this.emit('change', this.state);
-        return !exists; // Yeni durum: açık mı kapalı mı?
+        this.saveState();
+        return isActive;
+    }
+    // --- Branch Profile Mapping API ---
+    getBranchMappings() {
+        return this.state.branchProfiles || {};
+    }
+    setBranchMapping(pattern, profileId) {
+        if (!this.state.branchProfiles) {
+            this.state.branchProfiles = {};
+        }
+        this.state.branchProfiles[pattern] = profileId;
+        this.saveState();
+    }
+    removeBranchMapping(pattern) {
+        if (this.state.branchProfiles && this.state.branchProfiles[pattern]) {
+            delete this.state.branchProfiles[pattern];
+            this.saveState();
+        }
+    }
+    // Aktif branch için geçerli bir profil var mı? (Wildcard destekli)
+    resolveProfileForBranch(branchName) {
+        const mappings = this.getBranchMappings();
+        // 1. Birebir eşleşme
+        if (mappings[branchName])
+            return mappings[branchName];
+        // 2. Wildcard eşleşmeleri (örn: feat/* -> feat/login)
+        for (const [pattern, profileId] of Object.entries(mappings)) {
+            if (pattern.endsWith('*')) {
+                const prefix = pattern.slice(0, -1);
+                if (branchName.startsWith(prefix)) {
+                    return profileId;
+                }
+            }
+        }
+        return null;
     }
 }

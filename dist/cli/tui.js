@@ -1,121 +1,149 @@
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
-import { PluginScanner } from '../harvester/scanner.js';
 import { PROFILES } from '../core/profiles.js';
-import { ProfileStore } from '../core/profile-store.js';
-export async function showSkillSelector(stateManager) {
-    console.clear();
-    p.intro(pc.bgCyan(pc.black(' AGENT SKILL GATE ')));
-    const scanner = new PluginScanner();
-    const { manageable, builtInCount, details } = scanner.scanManageable();
-    const profileStore = new ProfileStore();
-    if (builtInCount > 0) {
-        p.log.success(pc.dim(`${builtInCount} native CLI commands protected and enabled.`));
-    }
-    const userProfiles = profileStore.getProfiles();
-    const menuOptions = [
-        ...PROFILES.map(prof => ({
-            value: `builtin:${prof.id}`,
-            label: prof.label,
-            hint: prof.description
-        })),
-        ...userProfiles.map(u => ({
-            value: `custom:${u.id}`,
-            label: pc.cyan(u.name),
-            hint: `${u.description} (${u.skillIds.length} capabilities)`
-        })),
-        {
-            value: 'action:create',
-            label: pc.green('➕ Create Custom Profile'),
-            hint: 'Bundle selected skills into a reusable profile preset.'
-        },
-        {
-            value: 'action:manual',
-            label: '⚙️ Manual Selection (One-off)',
-            hint: 'Customize active skills individually.'
+function applyState(symlinkManager, capabilities, activeIds) {
+    for (const cap of capabilities) {
+        if (activeIds.includes(cap.id)) {
+            symlinkManager.enableCapability(cap.canonicalFilePath);
         }
-    ];
-    const selection = await p.select({
-        message: 'Select execution profile or preset:',
-        options: menuOptions
+        else {
+            symlinkManager.disableCapability(cap.canonicalFilePath);
+        }
+    }
+}
+export async function runTui(stateManager, symlinkManager, profileStore, capabilities, gitGuard) {
+    p.intro(pc.bgCyan(pc.black(' AGENT SKILL GATE ')));
+    const currentBranch = gitGuard.getCurrentBranch();
+    if (currentBranch) {
+        p.log.info(pc.dim(`Current Branch: ${pc.cyan(currentBranch)}`));
+    }
+    const action = await p.select({
+        message: 'What would you like to configure?',
+        options: [
+            { value: 'skills', label: 'Toggle Individual Skills' },
+            { value: 'profile', label: 'Switch Active Profile' },
+            { value: 'branch', label: 'Configure Branch Autoswitch' },
+            { value: 'exit', label: 'Exit' }
+        ]
     });
-    if (p.isCancel(selection)) {
-        p.cancel('Operation cancelled.');
-        process.exit(0);
+    if (p.isCancel(action) || action === 'exit') {
+        p.outro('Configuration complete.');
+        return;
     }
-    const choice = selection;
-    let targetSkillIds = [];
-    if (choice === 'action:create') {
-        const profileName = await p.text({
-            message: 'Profile Name:',
-            placeholder: 'e.g. 🚀 Fullstack Rapid',
-            validate: (v) => (!v.trim() ? 'Profile name cannot be empty.' : undefined)
-        });
-        if (p.isCancel(profileName))
-            return;
-        const profileDesc = await p.text({
-            message: 'Profile Description:',
-            placeholder: 'e.g. Optimized stack for full-stack prototyping.'
-        });
-        if (p.isCancel(profileDesc))
-            return;
-        const skillChoices = await p.multiselect({
-            message: 'Select capabilities to include in this profile:',
-            options: manageable.map(s => ({
-                value: s.id,
-                label: s.name,
-                hint: `${s.description} [~${s.estimatedTokens} tok]`
-            }))
-        });
-        if (p.isCancel(skillChoices))
-            return;
-        const newProfile = {
-            id: profileName.toLowerCase().replace(/[^a-z0-9]/g, '-'),
-            name: profileName,
-            description: profileDesc || 'Custom user profile.',
-            skillIds: skillChoices
-        };
-        profileStore.saveProfile(newProfile);
-        p.log.success(pc.green(`Profile '${newProfile.name}' saved successfully!`));
-        targetSkillIds = newProfile.skillIds;
-    }
-    else if (choice.startsWith('custom:')) {
-        const profileId = choice.replace('custom:', '');
-        const profile = userProfiles.find(u => u.id === profileId);
-        if (profile)
-            targetSkillIds = profile.skillIds;
-    }
-    else if (choice.startsWith('builtin:')) {
-        const builtinId = choice.replace('builtin:', '');
-        const profile = PROFILES.find(p => p.id === builtinId);
-        targetSkillIds = details.filter(cap => profile.filter(cap)).map(cap => cap.id);
-    }
-    else {
-        const activeIds = stateManager.getActiveSkills();
-        const manualSelected = await p.multiselect({
-            message: 'Toggle capabilities for current workspace:',
-            options: manageable.map(s => ({
-                value: s.id,
-                label: s.name,
-                hint: `${s.description} [~${s.estimatedTokens} tok]`
+    // --- 1. TEKİL YETENEK YÖNETİMİ ---
+    if (action === 'skills') {
+        const activeSkills = stateManager.getActiveSkills();
+        const selected = await p.multiselect({
+            message: 'Select capabilities to enable for this workspace:',
+            options: capabilities.map((cap) => ({
+                value: cap.id,
+                label: cap.name || cap.id,
+                hint: `${cap.cliTarget} (${cap.capabilityType})`
             })),
-            initialValues: activeIds,
+            initialValues: activeSkills,
             required: false
         });
-        if (p.isCancel(manualSelected))
+        if (p.isCancel(selected)) {
+            p.cancel('Operation cancelled.');
             return;
-        targetSkillIds = manualSelected;
+        }
+        const targetIds = selected;
+        stateManager.setActiveSkills(targetIds);
+        applyState(symlinkManager, capabilities, targetIds);
+        p.outro(pc.green(`✓ Enabled ${targetIds.length} capabilities successfully.`));
+        return;
     }
-    for (const skill of manageable) {
-        const shouldBeActive = targetSkillIds.includes(skill.id);
-        const isCurrentlyActive = stateManager.isSkillActive(skill.id);
-        if (shouldBeActive !== isCurrentlyActive) {
-            stateManager.toggleSkill(skill.id);
+    // --- 2. PROFİL SEÇİMİ ---
+    if (action === 'profile') {
+        const customProfiles = profileStore.getProfiles();
+        const options = [
+            ...PROFILES.map((prof) => ({
+                value: prof.id,
+                label: prof.label,
+                hint: prof.description
+            })),
+            ...customProfiles.map((prof) => ({
+                value: prof.id,
+                label: `${prof.name} (Custom)`,
+                hint: prof.description
+            }))
+        ];
+        const selectedProfileId = await p.select({
+            message: 'Choose a capability profile:',
+            options
+        });
+        if (p.isCancel(selectedProfileId))
+            return;
+        let targetIds = [];
+        const builtin = PROFILES.find((pr) => pr.id === selectedProfileId);
+        if (builtin) {
+            targetIds = capabilities.filter(builtin.filter).map((c) => c.id);
+        }
+        else {
+            const custom = profileStore.getProfiles().find((pr) => pr.id === selectedProfileId);
+            if (custom)
+                targetIds = custom.skillIds;
+        }
+        stateManager.setActiveSkills(targetIds);
+        applyState(symlinkManager, capabilities, targetIds);
+        p.outro(pc.green(`✓ Switched to profile "${selectedProfileId}".`));
+        return;
+    }
+    // --- 3. DAL BAZLI OTOMATİK GEÇİŞ AYARLARI ---
+    if (action === 'branch') {
+        const mappings = stateManager.getBranchMappings();
+        p.log.message(pc.bold('Current Branch Rules:'));
+        const keys = Object.keys(mappings);
+        if (keys.length === 0) {
+            p.log.warn(pc.dim('No rules defined yet.'));
+        }
+        else {
+            for (const [pattern, prof] of Object.entries(mappings)) {
+                p.log.step(`${pc.yellow(pattern)} ➔ ${pc.cyan(prof)}`);
+            }
+        }
+        const branchAction = await p.select({
+            message: 'Branch Action:',
+            options: [
+                { value: 'add', label: 'Add or Update Rule' },
+                { value: 'delete', label: 'Delete Rule' },
+                { value: 'back', label: 'Back' }
+            ]
+        });
+        if (branchAction === 'add') {
+            const pattern = await p.text({
+                message: 'Enter branch name or pattern (e.g. main, feat/*, release/*):',
+                validate: (val) => (!val ? 'Branch pattern cannot be empty' : undefined)
+            });
+            if (p.isCancel(pattern))
+                return;
+            const profileOptions = [
+                ...PROFILES.map((pr) => ({ value: pr.id, label: pr.label })),
+                ...profileStore.getProfiles().map((pr) => ({ value: pr.id, label: pr.name }))
+            ];
+            const chosenProfile = await p.select({
+                message: `Select profile for "${pattern}":`,
+                options: profileOptions
+            });
+            if (p.isCancel(chosenProfile))
+                return;
+            stateManager.setBranchMapping(pattern, chosenProfile);
+            p.outro(pc.green(`✓ Branch rule saved: ${pattern} ➔ ${chosenProfile}`));
+        }
+        else if (branchAction === 'delete') {
+            const patterns = Object.keys(mappings);
+            if (patterns.length === 0) {
+                p.outro('No rules to delete.');
+                return;
+            }
+            const toDelete = await p.select({
+                message: 'Select rule to remove:',
+                options: patterns.map((patternKey) => ({ value: patternKey, label: patternKey }))
+            });
+            if (p.isCancel(toDelete))
+                return;
+            stateManager.removeBranchMapping(toDelete);
+            p.outro(pc.green(`✓ Removed rule for ${toDelete}`));
         }
     }
-    const totalTokens = manageable
-        .filter(s => targetSkillIds.includes(s.id))
-        .reduce((acc, curr) => acc + curr.estimatedTokens, 0);
-    p.note(`Active Capabilities: ${pc.green(targetSkillIds.length.toString())} / ${manageable.length}\nEstimated Context Overhead: ${pc.yellow(`~${totalTokens} tokens`)}`, 'Session Configuration');
-    p.outro(pc.green('✓ Workspace state synchronized.'));
 }
