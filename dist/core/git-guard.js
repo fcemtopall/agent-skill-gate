@@ -1,9 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
-export class GitGuard {
+import { EventEmitter } from 'node:events';
+export class GitGuard extends EventEmitter {
     projectRoot;
+    headWatcher = null;
+    currentBranchCache = null;
     constructor(projectRoot) {
+        super();
         this.projectRoot = projectRoot;
+        this.currentBranchCache = this.getCurrentBranch();
     }
     ensureGitIgnore() {
         const gitignorePath = path.join(this.projectRoot, '.gitignore');
@@ -36,8 +41,45 @@ export class GitGuard {
             if (content.startsWith('ref: refs/heads/')) {
                 return content.replace('ref: refs/heads/', '');
             }
+            // Detached HEAD durumu (commit hash döner)
+            return content.slice(0, 8);
+        }
+        catch {
+            return null;
+        }
+    }
+    // Dal değişimlerini (git checkout / git switch) yakalar
+    watchBranchChanges() {
+        const gitDir = path.join(this.projectRoot, '.git');
+        const headPath = path.join(gitDir, 'HEAD');
+        if (!fs.existsSync(headPath))
+            return;
+        try {
+            this.headWatcher = fs.watch(headPath, () => {
+                const newBranch = this.getCurrentBranch();
+                if (newBranch && newBranch !== this.currentBranchCache) {
+                    const oldBranch = this.currentBranchCache;
+                    this.currentBranchCache = newBranch;
+                    this.emit('branchChange', { from: oldBranch, to: newBranch });
+                }
+            });
         }
         catch { }
-        return null;
+    }
+    // Wildcard desteği: "feat/*" deseni "feat/auth" dalıyla eşleşir
+    matchBranchPattern(currentBranch, pattern) {
+        if (pattern === currentBranch)
+            return true;
+        if (pattern.endsWith('*')) {
+            const prefix = pattern.slice(0, -1);
+            return currentBranch.startsWith(prefix);
+        }
+        return false;
+    }
+    dispose() {
+        if (this.headWatcher) {
+            this.headWatcher.close();
+            this.headWatcher = null;
+        }
     }
 }
