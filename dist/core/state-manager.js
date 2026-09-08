@@ -9,6 +9,11 @@ export class StateManager extends EventEmitter {
         this.configPath = path.join(projectRoot, '.agent-skills.json');
         this.state = this.loadState();
     }
+    // Diskten her zaman güncel veriyi okuyan yardımcı metot
+    reload() {
+        this.state = this.loadState();
+        return this.state;
+    }
     loadState() {
         if (fs.existsSync(this.configPath)) {
             try {
@@ -16,7 +21,7 @@ export class StateManager extends EventEmitter {
                 return JSON.parse(content);
             }
             catch {
-                // Hata durumunda varsayılan yapıya dön
+                // Okuma hatasında varsayılan state'e dön
             }
         }
         return {
@@ -33,17 +38,21 @@ export class StateManager extends EventEmitter {
         this.emit('stateChanged', this.state);
     }
     getActiveSkills() {
+        this.reload();
         return [...this.state.activeSkillIds];
     }
     isSkillActive(skillId) {
+        this.reload();
         return this.state.activeSkillIds.includes(skillId);
     }
     setActiveSkills(skillIds) {
+        this.reload();
         this.state.activeSkillIds = [...skillIds];
         this.saveState();
     }
     // --- Branch Memory API ---
     saveBranchSnapshot(branch, skillIds) {
+        this.reload();
         if (!this.state.branchStates) {
             this.state.branchStates = {};
         }
@@ -52,6 +61,7 @@ export class StateManager extends EventEmitter {
         this.saveState();
     }
     getBranchSnapshot(branch) {
+        this.reload(); // Diskten taze çek!
         if (this.state.branchStates && Array.isArray(this.state.branchStates[branch])) {
             return [...this.state.branchStates[branch]];
         }
@@ -59,9 +69,11 @@ export class StateManager extends EventEmitter {
     }
     // --- Branch Profile Mapping API ---
     getBranchMappings() {
+        this.reload();
         return this.state.branchProfiles || {};
     }
     setBranchMapping(pattern, profileId) {
+        this.reload();
         if (!this.state.branchProfiles) {
             this.state.branchProfiles = {};
         }
@@ -69,6 +81,7 @@ export class StateManager extends EventEmitter {
         this.saveState();
     }
     removeBranchMapping(pattern) {
+        this.reload();
         if (this.state.branchProfiles && this.state.branchProfiles[pattern]) {
             delete this.state.branchProfiles[pattern];
             this.saveState();

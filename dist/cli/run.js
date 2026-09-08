@@ -39,7 +39,12 @@ export async function runCli(args) {
         gitGuard.watchBranchChanges();
         gitGuard.on('branchChange', ({ from, to }) => {
             console.log(pc.yellow(`\n⎇ Branch switched to: ${to}`));
-            // 1. ÖNCELİK: Bu dal için daha önceden kaydedilmiş bir snapshot var mı?
+            // 0. ADIM: Ayrılınan dal varsa (from), o daldaki son aktif durumu hafızasına mühürle
+            if (from) {
+                const currentActive = stateManager.getActiveSkills();
+                stateManager.saveBranchSnapshot(from, currentActive);
+            }
+            // 1. ÖNCELİK: Geçilen dal (to) için daha önceden kaydedilmiş bir hafıza var mı?
             const savedSnapshot = stateManager.getBranchSnapshot(to);
             if (savedSnapshot !== null) {
                 stateManager.setActiveSkills(savedSnapshot);
@@ -61,17 +66,18 @@ export async function runCli(args) {
                     if (custom)
                         targetIds = custom.skillIds;
                 }
-                // Bu dalın ilk snapshot'ı olarak kaydet
+                // Bu dalın ilk snapshot'ı olarak diske kaydet
                 stateManager.saveBranchSnapshot(to, targetIds);
                 applyState(symlinkManager, capabilities, targetIds);
                 console.log(pc.green(`✓ Applied profile "${targetProfile}" (${targetIds.length} capabilities) and saved snapshot.`));
                 return;
             }
-            // 3. ÖNCELİK: Ne kural ne hafıza var; mevcut durumu bu dala kopyalayarak koru
+            // 3. ÖNCELİK: Ne kural ne hafıza var; mevcut durumu bu dala devret
             const currentActive = stateManager.getActiveSkills();
             stateManager.saveBranchSnapshot(to, currentActive);
             console.log(pc.dim(`No profile rule or previous memory for [${to}]. Inherited ${currentActive.length} active capabilities.`));
         });
+        // Node.js sürecinin ayakta kalmasını sağla
         process.stdin.resume();
         return;
     }
