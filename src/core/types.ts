@@ -1,15 +1,25 @@
 export type SkillRuntime = 'npx' | 'node' | 'python' | 'binary';
+export interface BranchProfileMapping {
+  [branchPattern: string]: string; // Örn: "main": "builtin:prototyping", "release/*": "builtin:audit"
+}
+
+export interface WorkspaceSkillConfig {
+  version: string;
+  activeSkillIds: string[];
+  branchProfiles?: BranchProfileMapping;
+  updatedAt: string;
+}
 
 export interface SkillDefinition {
-  id: string;                      // Benzersiz kimlik: örn. "postgres-inspector"
-  name: string;                    // Görünen isim: örn. "PostgreSQL Inspector"
-  description: string;             // Arayüzde görünecek 1 satırlık net özet
-  category: 'database' | 'api' | 'testing' | 'devops' | 'git';
-  runtime: SkillRuntime;
-  command: string;                 // Çalıştırılacak paket/komut: örn. "@modelcontextprotocol/server-postgres"
+  id: string;
+  name: string;
+  description: string;
+  category: 'core' | 'git' | 'analysis' | 'devops' | 'database' | 'api';
+  runtime: 'binary' | 'node' | 'python' | 'docker' | 'npx';
+  command: string;
   args?: string[];
-  requiredEnv?: string[];          // İhtiyaç duyduğu env: örn. ["DATABASE_URL"]
-  estimatedTokens: number;         // Bağlam maliyet hesabı için yaklaşık token
+  estimatedTokens: number;
+  requiredEnv?: string[];
 }
 
 export interface ProjectSkillState {
