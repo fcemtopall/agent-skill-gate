@@ -9,7 +9,7 @@ export class StateManager extends EventEmitter {
 
   constructor(projectRoot: string) {
     super();
-    this.configPath = path.join(projectRoot, '.agent-skills.json');
+    this.configPath = path.resolve(projectRoot, '.agent-skills.json');
     this.state = this.loadState();
   }
 
@@ -23,23 +23,36 @@ export class StateManager extends EventEmitter {
       try {
         const content = fs.readFileSync(this.configPath, 'utf-8');
         return JSON.parse(content);
-      } catch {
-        // Hata durumunda varsayılan state
+      } catch (e) {
+        // Parse hatası olursa
       }
     }
 
-    return {
+    const defaultState: WorkspaceSkillConfig = {
       version: '1.1.0',
       activeSkillIds: [],
-      branchProfiles: {},
+      branchProfiles: {
+        "feat/*": "prototyping"
+      },
       branchStates: {},
       updatedAt: new Date().toISOString()
     };
+
+    // Dosya yoksa hemen oluştur
+    try {
+      fs.writeFileSync(this.configPath, JSON.stringify(defaultState, null, 2), 'utf-8');
+    } catch {}
+
+    return defaultState;
   }
 
   private saveState(): void {
     this.state.updatedAt = new Date().toISOString();
-    fs.writeFileSync(this.configPath, JSON.stringify(this.state, null, 2), 'utf-8');
+    try {
+      fs.writeFileSync(this.configPath, JSON.stringify(this.state, null, 2), 'utf-8');
+    } catch (err) {
+      console.error('Failed to write .agent-skills.json:', err);
+    }
     this.emit('stateChanged', this.state);
   }
 
