@@ -9,7 +9,6 @@ export class StateManager extends EventEmitter {
         this.configPath = path.join(projectRoot, '.agent-skills.json');
         this.state = this.loadState();
     }
-    // Diskten her zaman güncel veriyi okuyan yardımcı metot
     reload() {
         this.state = this.loadState();
         return this.state;
@@ -21,7 +20,7 @@ export class StateManager extends EventEmitter {
                 return JSON.parse(content);
             }
             catch {
-                // Okuma hatasında varsayılan state'e dön
+                // Hata durumunda varsayılan state
             }
         }
         return {
@@ -61,8 +60,10 @@ export class StateManager extends EventEmitter {
         this.saveState();
     }
     getBranchSnapshot(branch) {
-        this.reload(); // Diskten taze çek!
-        if (this.state.branchStates && Array.isArray(this.state.branchStates[branch])) {
+        this.reload();
+        if (this.state.branchStates &&
+            Array.isArray(this.state.branchStates[branch]) &&
+            this.state.branchStates[branch].length > 0) {
             return [...this.state.branchStates[branch]];
         }
         return null;

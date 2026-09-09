@@ -50,22 +50,24 @@ export async function runCli(args: string[]): Promise<void> {
     gitGuard.on('branchChange', ({ from, to }: { from: string | null; to: string }) => {
       console.log(pc.yellow(`\n⎇ Branch switched to: ${to}`));
 
-      // 0. ADIM: Ayrılınan dal varsa (from), o daldaki son aktif durumu hafızasına mühürle
+      // 0. ADIM: Ayrılınan daldan geçerli bir yetenek durumu varsa kaydet
       if (from) {
         const currentActive = stateManager.getActiveSkills();
-        stateManager.saveBranchSnapshot(from, currentActive);
+        if (currentActive.length > 0) {
+          stateManager.saveBranchSnapshot(from, currentActive);
+        }
       }
 
-      // 1. ÖNCELİK: Geçilen dal (to) için daha önceden kaydedilmiş bir hafıza var mı?
+      // 1. ÖNCELİK: Hedef dal için daha önceden kaydedilmiş dolu bir hafıza var mı?
       const savedSnapshot = stateManager.getBranchSnapshot(to);
-      if (savedSnapshot !== null) {
+      if (savedSnapshot !== null && savedSnapshot.length > 0) {
         stateManager.setActiveSkills(savedSnapshot);
         applyState(symlinkManager, capabilities, savedSnapshot);
         console.log(pc.green(`✓ Restored branch memory state: ${savedSnapshot.length} capabilities active.`));
         return;
       }
 
-      // 2. ÖNCELİK: Bu dal için bir profil kuralı eşleşiyor mu?
+      // 2. ÖNCELİK: Profil kuralı eşleşiyor mu?
       const targetProfile = stateManager.resolveProfileForBranch(to);
       if (targetProfile) {
         console.log(pc.cyan(`➔ Initializing branch from profile rule: ${targetProfile}`));
@@ -79,24 +81,26 @@ export async function runCli(args: string[]): Promise<void> {
           if (custom) targetIds = custom.skillIds;
         }
 
-        // Bu dalın ilk snapshot'ı olarak diske kaydet
         stateManager.saveBranchSnapshot(to, targetIds);
         applyState(symlinkManager, capabilities, targetIds);
         console.log(pc.green(`✓ Applied profile "${targetProfile}" (${targetIds.length} capabilities) and saved snapshot.`));
         return;
       }
 
-      // 3. ÖNCELİK: Ne kural ne hafıza var; mevcut durumu bu dala devret
+      // 3. ÖNCELİK: Kural da yok, hafıza da yok. Mevcut yetenekleri koru
       const currentActive = stateManager.getActiveSkills();
-      stateManager.saveBranchSnapshot(to, currentActive);
-      console.log(pc.dim(`No profile rule or previous memory for [${to}]. Inherited ${currentActive.length} active capabilities.`));
+      if (currentActive.length > 0) {
+        stateManager.saveBranchSnapshot(to, currentActive);
+        console.log(pc.dim(`No profile rule or previous memory for [${to}]. Inherited ${currentActive.length} active capabilities.`));
+      } else {
+        console.log(pc.dim(`No profile rule or previous memory for [${to}]. State is clean.`));
+      }
     });
 
-    // Node.js sürecinin ayakta kalmasını sağla
     process.stdin.resume();
     return;
   }
 
-  // 3. Normal İnteraktif Arayüz (TUI)
+  // 3. Normal TUI
   await runTui(stateManager, symlinkManager, profileStore, capabilities, gitGuard);
 }
